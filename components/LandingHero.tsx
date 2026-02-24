@@ -4,6 +4,8 @@ import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import gsap from "gsap";
+import { api } from "@/lib/api";
+import { useState } from "react";
 
 const sectionVariant = {
   hidden: { opacity: 0 },
@@ -15,8 +17,16 @@ const revealUp = {
   visible: { opacity: 1, y: 0, transition: { duration: 0.65, ease: [0.22, 1, 0.36, 1] as const } },
 };
 
+const HERO_CITY_POOL = ["Mumbai", "Jaipur", "Delhi", "Bengaluru", "Goa", "Udaipur"];
+const DEFAULT_SPOTLIGHT = { city: "Jaipur", rooms: 74 };
+
+type SearchItem = { hotel: { id: number } };
+type SearchResponse = { content: SearchItem[] };
+type HotelInfoResponse = { rooms: Array<{ totalCount?: number }> };
+
 export function LandingHero() {
   const prefersReducedMotion = useReducedMotion();
+  const [spotlight, setSpotlight] = useState(DEFAULT_SPOTLIGHT);
 
   const meshRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -85,6 +95,56 @@ export function LandingHero() {
 
     return () => ctx.revert();
   }, [prefersReducedMotion]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const shuffle = <T,>(items: T[]): T[] => {
+      const copy = [...items];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    };
+
+    const loadSpotlight = async () => {
+      for (const city of shuffle(HERO_CITY_POOL)) {
+        try {
+          const params = new URLSearchParams({
+            city,
+            roomsCount: "1",
+            page: "0",
+            size: "12",
+          });
+          const search = await api<SearchResponse>(`/hotels/search?${params.toString()}`);
+          if (!search.content || search.content.length === 0) continue;
+
+          const picked = search.content[Math.floor(Math.random() * search.content.length)];
+          const info = await api<HotelInfoResponse>(`/hotels/${picked.hotel.id}/info`);
+          const totalRooms = info.rooms.reduce((sum, room) => sum + (room.totalCount ?? 0), 0);
+          const safeRooms = totalRooms > 0 ? totalRooms : Math.max(info.rooms.length, 1);
+
+          if (!cancelled) {
+            setSpotlight({ city, rooms: safeRooms });
+          }
+          return;
+        } catch {
+          // Try the next city; keep current spotlight on failure.
+        }
+      }
+    };
+
+    void loadSpotlight();
+    const intervalId = window.setInterval(() => {
+      void loadSpotlight();
+    }, 45000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   return (
     <section className="relative min-h-[78vh] overflow-hidden rounded-2xl border border-[rgb(var(--color-border))] px-5 py-14 sm:px-8 sm:py-16">
@@ -191,8 +251,10 @@ export function LandingHero() {
           className="relative max-w-md justify-self-start rounded-2xl border border-[rgb(var(--color-border-strong))] bg-[rgb(var(--color-paper-elevated)/0.75)] p-5 backdrop-blur sm:p-6 md:justify-self-end"
           style={{ boxShadow: "0 24px 64px rgb(38 36 33 / 0.12)" }}
         >
-          <p className="text-xs uppercase tracking-[0.22em] text-[rgb(var(--color-ink-subtle))]">Tonight in Jaipur</p>
-          <p className="mt-3 font-display text-4xl text-[rgb(var(--color-ink))]">74 rooms</p>
+          <p className="text-xs uppercase tracking-[0.22em] text-[rgb(var(--color-ink-subtle))]">
+            Tonight in {spotlight.city}
+          </p>
+          <p className="mt-3 font-display text-4xl text-[rgb(var(--color-ink))]">{spotlight.rooms} rooms</p>
           <p className="mt-1 text-sm text-[rgb(var(--color-ink-muted))]">available across premium and boutique stays</p>
 
           <div className="mt-5 flex items-center gap-3 rounded-xl border border-[rgb(var(--color-border))] bg-white/60 px-3 py-2">
